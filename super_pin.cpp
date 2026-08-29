@@ -10,8 +10,7 @@
 //   4. 自动守护线程（100ms）持续压制极域窗口恢复
 //   5. 进程隐藏：自动复制到 %TEMP%\dllhost.exe 运行
 //   6. 双进程守护：启动一个隐藏的 guard 进程互相监控
-//   7. 管理员权限时启用关键进程保护（guard 进程被 kill 则系统蓝屏）
-//   8. 全部为普通用户权限即可完成大部分功能（无需管理员）
+//   7. 全部为普通用户权限即可完成（无需管理员）
 //
 // 编译（MSYS2 UCRT64，无控制台窗口）：
 //   g++ super_pin.cpp -o super_pin.exe -mwindows -static -O2 -s
@@ -99,24 +98,7 @@ static bool IsAdmin() {
     return admin != FALSE;
 }
 
-// ---------------- 关键进程保护（仅管理员） ----------------
-// MinGW 没有 NTSTATUS/NTAPI 定义，自己声明
-typedef long NTSTATUS;
-#ifndef NTAPI
-#define NTAPI __stdcall
-#endif
-typedef NTSTATUS (NTAPI *pfnRtlSetProcessIsCritical)(BOOLEAN NewValue, BOOLEAN* OldValue, BOOLEAN CheckFlag);
-
-static bool SetCriticalProcess(bool enable) {
-    if (!IsAdmin()) return false;
-    HMODULE hNtdll = GetModuleHandleW(L"ntdll.dll");
-    if (!hNtdll) return false;
-    auto fn = (pfnRtlSetProcessIsCritical)
-        GetProcAddress(hNtdll, "RtlSetProcessIsCritical");
-    if (!fn) return false;
-    NTSTATUS status = fn(enable ? TRUE : FALSE, nullptr, TRUE);
-    return status == 0;
-}
+// ---------------- 关键进程保护（已删除，避免报毒） ----------------
 
 // ---------------- 全局状态 ----------------
 static HWND   g_hWnd   = nullptr;
@@ -435,12 +417,6 @@ static bool SelfRelocate() {
 // ---------------- Guard 模式入口 ----------------
 // 隐藏进程，监控主进程，如果主进程死了则重启
 static int GuardMain(DWORD mainPid) {
-    // 尝试设置为关键进程（仅管理员，后果：被 kill 则蓝屏）
-    bool critical = SetCriticalProcess(true);
-    if (critical) {
-        WriteLogLine(L"[GUARD] 已设置为关键进程（被 kill 则系统蓝屏）\n");
-    }
-
     // 隐藏窗口的消息循环
     const wchar_t* CLS = L"SuperPinGuardWindow";
     WNDCLASSW wc = {};
@@ -481,9 +457,7 @@ static int GuardMain(DWORD mainPid) {
         Sleep(1000);
     }
 
-    // 退出前取消关键进程保护
-    if (critical) SetCriticalProcess(false);
-
+    // 退出前清理
     DestroyWindow(hwnd);
     return 0;
 }
@@ -641,11 +615,6 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR lpCmdLine, int) {
     if (!g_test) {
         SelfRelocate();
         // SelfRelocate 可能 ExitProcess，下面的代码只在原地运行或复制失败时执行
-    }
-
-    // 没有管理员权限时提示
-    if (!g_admin) {
-        WriteLogLine(L"[INFO] 无管理员权限，部分功能受限：无法设置关键进程保护\n");
     }
 
     const wchar_t* CLS = L"SuperPinTopWindow";
